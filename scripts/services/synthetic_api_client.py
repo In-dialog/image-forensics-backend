@@ -163,4 +163,3 @@ def ensure_available(config: SyntheticApiConfig) -> bool:
     except BaseException:
         _release_owned(process)
         raise
-

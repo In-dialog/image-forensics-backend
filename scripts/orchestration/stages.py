@@ -27,4 +27,3 @@ STAGES = (
     Stage("synthetic_analysis", "Synthetic Analysis", "ranking", "run_synthetic_analysis"),
 )
 STAGE_BY_KEY = {stage.key: stage for stage in STAGES}
-

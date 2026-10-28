@@ -100,4 +100,3 @@ def execute_plan(
         if on_progress:
             on_progress(call.key, index, total, "finished")
     return folder
-
