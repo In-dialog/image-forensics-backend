@@ -1,0 +1,4 @@
+# Install ONLY in .venv-synthetic, never in the main environment.
+# nonescape pins a different torch/transformers stack.
+nonescape @ https://github.com/e3ntity/nonescape/archive/52619d5c96ab83f018d9e879d4be14d847ccb15d.zip#subdirectory=python
+huggingface-hub==0.34.4

@@ -1,0 +1,52 @@
+name: Backend checks
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contracts:
+    name: Python 3.11 / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      HF_HUB_OFFLINE: '1'
+      TRANSFORMERS_OFFLINE: '1'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+      - name: Check Python syntax
+        run: python -m compileall -q ensure_path.py install scripts tests
+      # -S excludes site-packages: these checks intentionally use only the
+      # standard library. Do not run Install, pip, GPU stages or model downloads.
+      - name: Installer safety and hardware profiles
+        run: python -B -S -m unittest discover -s tests -p test_installation.py
+      - name: Optional forgery packaging and archive safety
+        run: python -B -S -m unittest discover -s tests -p test_forgery_install.py
+      - name: Stage progress
+        run: python -B -S -m unittest discover -s tests -p test_stage_progress.py
+      - name: Owned service lifecycle
+        run: python -B -S -m unittest discover -s tests -p test_synthetic_lifecycle.py
+      - name: Private Linux runtime download and extraction safety
+        run: python -B -S -m unittest discover -s tests -p test_ollama_runtime.py
+      - name: Pipeline contracts
+        run: python -B -S -m unittest discover -s tests -p test_pipeline_execution.py
+      - name: Prompt and configuration contracts
+        run: python -B -S -m unittest discover -s tests -p test_prompt_contracts.py

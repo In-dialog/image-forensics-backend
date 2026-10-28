@@ -1,0 +1,2 @@
+# Use Install.cmd / install.sh for hardware detection and the correct torch wheel.
+-r requirements/core.txt

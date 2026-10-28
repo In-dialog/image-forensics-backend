@@ -1,0 +1,7 @@
+# Advanced optional add-on. jpegio may require a C/C++ compiler and JPEG headers.
+# Keep outside the default install so a native build cannot block core analysis.
+# install/forgery_source.py obtains that pinned upstream commit and changes only
+# its real OpenCV dependency declaration before uv builds the wheel. LICENSE is
+# retained; only one cv2 implementation (headless) is installed.
+# Run the guided installer with --with-forgery to prepare this directory first.
+./.tools/photoholmes-headless
