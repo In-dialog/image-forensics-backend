@@ -4,17 +4,11 @@ The local analysis engine for Image Forensics Analysis. It detects and segments 
 
 This repository is independent of the web interface. It contains source code and tests, **not model weights, previous analyses, accounts, or a Python environment**.
 
-## First installation
+**Only want to view saved results? Install the separate image-forensics-frontend repository. You do not need this backend.**
 
-1. Download this repository using **Code → Download ZIP** on GitHub, then extract it into a normal folder. Do not run it from inside the ZIP.
-2. **Windows:** double-click **Install.cmd**. **Linux:** open a terminal in the extracted folder and run `bash install.sh`.
-3. Follow the installer. It checks the machine, prepares an isolated Python environment, installs dependencies, and guides model setup. Keep the window open until it reports completion.
-4. **Windows:** double-click **Start.cmd**. **Linux:** run `bash start.sh`. Keep that terminal open while analyzing images.
-5. Install/start the separate **image-forensics-frontend** repository and open `http://127.0.0.1:3100`.
+[Install](#install) · [Run](#run-an-analysis) · [Stop and restart](#stop-and-restart) · [Troubleshooting](#troubleshooting)
 
-The install step does not launch the analysis API. Downloads happen on the machine running the installer; cached Hugging Face/Ollama models are reused. Running the installer again preserves analysis results.
-
-### What you need
+## Before you install
 
 | Component | Requirement |
 | --- | --- |
@@ -29,12 +23,89 @@ macOS, AMD/Intel GPU acceleration, and ARM backend machines are not supported by
 
 See [hardware and model setup](docs/HARDWARE.md) for the official links and cache options.
 
+You do **not** need to install Python or Git yourself. You need an internet connection for the first installation. The installer prepares private Python environments and selects the CPU/CUDA package profile for your machine. NVIDIA drivers must already work; it does not replace them.
+
+### Prepare your Hugging Face account
+
+Complete these steps before the large model downloads:
+
+1. [Create or sign into your Hugging Face account](https://huggingface.co/join).
+2. Open [facebook/sam3](https://huggingface.co/facebook/sam3), read its terms, and request/accept access. Wait until that account has access.
+3. Open [Access Tokens](https://huggingface.co/settings/tokens) and create a **read** token. A fine-grained token must be allowed to read the gated SAM3 repository.
+4. Keep it ready for the installer's hidden-input prompt. Enter the token there, not in the website or a GitHub issue.
+
+A token alone does not grant access to a model whose access request is still pending.
+
+## Install
+
+### 1. Download from GitHub
+
+On this repository's GitHub page, select **Code → Download ZIP**. Extract the ZIP into a normal folder on a drive with enough space. Open the extracted folder containing `Install.cmd` and `install.sh`.
+
+Do not run the installer from inside the ZIP. Keep the installed folder in place; its private Python environment should not be moved between computers.
+
+### 2. Run the installer
+
+**Windows:** double-click **Install.cmd**. Alternatively, open PowerShell in the extracted backend folder and run:
+
+```powershell
+.\Install.cmd
+```
+
+**Linux:** open Terminal in the extracted backend folder and run:
+
+```bash
+bash install.sh
+```
+
+Follow the prompts and keep the window open until it says **Setup complete**. The installer checks your hardware and storage, installs dependencies, requests model authentication when needed, and downloads the required models. The first installation can take a while; watch the progress messages.
+
+If setup fails, read the final error, fix that issue, and rerun the installer. Successfully cached models are reused. Running Install again preserves analysis results. Installation does not start the analysis API.
+
+## Run an analysis
+
+### 1. Start the backend
+
+**Windows:** double-click **Start.cmd**, or run this from PowerShell in the backend folder:
+
+```powershell
+.\Start.cmd
+```
+
+**Linux:** run:
+
+```bash
+bash start.sh
+```
+
+Wait for **Analysis API: http://127.0.0.1:8766**. Leave that terminal open. The backend has no graphical window of its own.
+
+### 2. Open the web interface
+
+Install the separate **image-forensics-frontend** repository using its README, then start it. Open **http://127.0.0.1:3100** in your browser.
+
+For the normal local setup, both applications run on the same computer. Windows has launchers for both. Linux users can run the frontend with Node.js 24 using its developer commands. A frontend on another computer requires an explicitly configured local tunnel; there is no automatic network discovery.
+
+### 3. Select the work to run
+
+1. Open **New analysis** in the local website.
+2. Choose an image and select the stages you want.
+3. Adjust the analysis questions/rankings if needed.
+4. Select **Start analysis** and watch the progress and previews.
+5. Open the completed result in the database viewer.
+
+## Stop and restart
+
+Press **Ctrl+C in the backend terminal** to stop it. Stop the frontend in its own terminal with Ctrl+C. Next time, use **Start** again; you do not need to reinstall.
+
+If a run was interrupted or failed, open **Unfinished** in the website. You can resume a run, resume unfinished runs in order, or delete one. Nothing resumes automatically after startup.
+
 ## Safe installation preview
 
 Inspect the plan without installing Python packages, fetching models, or starting services:
 
 ```powershell
-Install.cmd --dry-run
+.\Install.cmd --dry-run
 ```
 
 ```sh
@@ -53,7 +124,57 @@ Results live in `data/` by default. The web app downloads successful results int
 
 Start reuses an existing Ollama service or starts one for this backend session. Closing the API stops only services started by this application, including the optional synthetic service; it leaves independently running services alone.
 
-To install software now and fetch models later, use `Install.cmd --skip-models` or `bash install.sh --skip-models`. Then run `.venv\Scripts\python.exe -B install\models.py` on Windows or `.venv/bin/python -B install/models.py` on Linux. `--group sam3` (or `depth`, `pose`, `saliency`, `ollama`, `forgery`, `synthetic`) prepares just that model group. Re-running model preparation reuses successful cached downloads.
+To install software now and fetch models later, use `.\Install.cmd --skip-models` in Windows PowerShell or `bash install.sh --skip-models` on Linux.
+
+**Complete or retry model preparation:**
+
+Windows PowerShell, opened in the backend folder:
+
+```powershell
+.\.venv\Scripts\python.exe -B install\models.py
+```
+
+Linux:
+
+```bash
+.venv/bin/python -B install/models.py
+```
+
+Add `--group sam3` to retry just SAM3, or use `depth`, `pose`, `saliency`, `ollama`, `forgery` or `synthetic` for the corresponding installed feature. Successful cached downloads are reused.
+
+## Troubleshooting
+
+| What you see | What to do |
+| --- | --- |
+| SAM3 access denied / 401 / 403 | Check access on the model page and make sure your token belongs to the approved account. Retry model preparation. |
+| Not enough disk space | Choose a larger drive before installing, or configure a model-cache location using the hardware guide. Do not bypass the check unless you know which existing caches are reused. |
+| NVIDIA/CUDA is unavailable | Update the driver using NVIDIA's official tools and retry, or explicitly use `--profile cpu`. CPU mode is slower. |
+| Missing Ollama model | Finish model preparation using the command above, then start the backend again. |
+| Port 8766 is already in use | A backend may already be running. Keep one instance; close the older terminal before starting another. |
+| The website cannot find the backend | Keep the backend terminal open, check for the API-ready message, then select **Try again** in the local website. The Cloudflare-hosted viewer does not connect to your computer's backend. |
+| The Start window closes immediately | Open PowerShell in the backend folder and run `.\Start.cmd` there to keep the error visible. |
+| An optional forensic package fails to build | Use the core installation first. Native add-ons can require a C/C++ compiler and JPEG development libraries. |
+
+## Optional installation choices
+
+Run these commands in PowerShell opened in the backend folder. On Linux, use the same options after `bash install.sh`.
+
+| Purpose | Windows PowerShell command |
+| --- | --- |
+| Use the CPU deliberately | `.\Install.cmd --profile cpu` |
+| Defer model downloads | `.\Install.cmd --skip-models` |
+| Put new HF/Torch/forgery caches on another drive | `.\Install.cmd --cache-dir "D:\AI-models"` |
+| Add advanced forensic tools | `.\Install.cmd --with-forgery` |
+| Add isolated synthetic-image detection | `.\Install.cmd --with-synthetic` |
+| Show all options | `.\Install.cmd --help` |
+
+Ollama and CLIP have separate cache settings. Read [hardware, models and storage](docs/HARDWARE.md) before choosing a custom location.
+
+## Updating and keeping your results
+
+Stop both applications first. Back up `data/` (including its hidden `.jobs` and `.inputs` directories), `scripts/configuration/settings.json`, and `.install-state.json` if present. These are private files; keep them out of GitHub.
+
+Update the source files in the existing project location, keeping your results and private configuration files. Run Install again using the same optional-feature/cache options you chose originally, then review the selected stages. The installer reuses environments and caches and preserves analysis data. Keeping the project location avoids breaking installed-environment paths.
 
 ## Development
 
@@ -67,6 +188,8 @@ python -m unittest discover -s tests -p 'test_*.py'
 Use the installed project Python environment for development. Tests inject fake model calls; the HTTP contract tests use temporary local sockets. No inference/download is needed for unit tests.
 
 See [architecture](docs/ARCHITECTURE.md) and [third-party components](THIRD_PARTY.md).
+
+See [validation performed and remaining machine tests](docs/VALIDATION.md) for the current release checks.
 
 ## License
 
