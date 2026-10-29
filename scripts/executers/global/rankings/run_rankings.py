@@ -71,8 +71,10 @@ def execute(
         metadata = json.load(f)
     extracts = enumerate_analysis_items(run_folder, metadata)
     progress_steps("Rank items", "Save rankings")
+    profile = resolve_profile("per_item_rankings", prompt_profile)
     if not extracts:
         start_step(1, total=0)
+        save_rankings(run_folder, profile, [], scope="per_item")
         return run_folder
 
     image_path = _get_full_image_path(run_folder, meta_path)
@@ -80,7 +82,6 @@ def execute(
         print(f"No full image found for {run_folder}")
         return run_folder
 
-    profile = resolve_profile("per_item_rankings", prompt_profile)
     items: list[dict] = []
     source = original_image_path(run_folder, metadata) or image_path
     with vision_model_session(vision_model) as keep_alive:

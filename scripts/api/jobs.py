@@ -4,6 +4,7 @@ from __future__ import annotations
 import contextlib
 import copy
 import io
+import hashlib
 import json
 import re
 import shutil
@@ -190,13 +191,11 @@ class JobManager:
                 if job["status"] not in RECOVERABLE or self.active_job_id == job_id:
                     raise BusyError("Only failed or interrupted analyses can be resumed.")
                 image, settings, prompts = self.recovery.inputs(job)
-                first = next((i for i, stage in enumerate(job["stages"]) if stage["status"] != "succeeded"), len(job["stages"]))
-                if not (self.data_dir / job_id / "metadata.json").is_file():
-                    first = 0
+                first, repair = self.recovery.completed_prefix(job, image, settings, prompts)
                 keys = [stage["key"] for stage in job["stages"]][first:]
                 if keys:
                     build_plan(self.data_dir / job_id, image, keys, settings, prompts)
-                prepared.append((job, first, image, settings, prompts))
+                prepared.append((job, first, image, settings, prompts, repair))
             prepared.sort(key=lambda item: item[0]["created_at"])
             originals = {job["id"]: copy.deepcopy(job) for job, *_ in prepared}
             try:
@@ -205,13 +204,17 @@ class JobManager:
                                resume_attempts=job.get("resume_attempts", 0) + 1)
                     for stage in job["stages"][first:]:
                         stage["status"] = "pending"
+                        stage.pop("substeps", None)
+                        stage.pop("current_substep", None)
                     self._persist(job)
             except OSError:
                 for key, original in originals.items():
                     self.jobs[key] = original
                     self._persist_progress(original, "Resume rollback")
                 raise
-            self.queue.extend((job["id"], image, settings, prompts) for job, _, image, settings, prompts in prepared)
+            for job, first, _, _, _, repair in prepared:
+                self._append_log(job["id"], repair or f"Resume validation: verified outputs for {first} completed stage(s).")
+            self.queue.extend((job["id"], image, settings, prompts) for job, _, image, settings, prompts, _ in prepared)
             self._start_next()
             return self.list()
 
@@ -252,7 +255,8 @@ class JobManager:
             job = dict(id=job_id, status="queued", original_filename=upload["filename"], stage_key=None,
                        completed_stages=0, total_stages=len(stages),
                        stages=[dict(key=key, label=STAGE_BY_KEY[key].label, status="pending") for key in stages],
-                       created_at=now(), updated_at=now(), error=None, result_id=None, logs=[], upload_id=upload["upload_id"])
+                       created_at=now(), updated_at=now(), error=None, result_id=None, logs=[], upload_id=upload["upload_id"],
+                       source_sha256=hashlib.sha256(job_image.read_bytes()).hexdigest())
             self.jobs[job_id] = job
             try:
                 self._persist(job)
@@ -324,12 +328,28 @@ class JobManager:
         with contextlib.redirect_stdout(output), contextlib.redirect_stderr(errors):
             try:
                 with self.lock:
+                    # Queued runs can wait: validate their inputs and completed
+                    # outputs again immediately before executing any model.
+                    job = self.jobs[job_id]
+                    image, settings, prompt_dir = self.recovery.inputs(job)
+                    first, repair = self.recovery.completed_prefix(job, image, settings, prompt_dir)
+                    if repair:
+                        self._append_log(job_id, repair)
+                    for stage in job["stages"][first:]:
+                        stage["status"] = "pending"
+                    job["completed_stages"] = first
                     self.jobs[job_id]["status"] = "running"
                     self._persist(self.jobs[job_id])
                 folder = self.data_dir / job_id
                 original_dir = folder / "original"
                 original_dir.mkdir(parents=True, exist_ok=True)
-                if not (original_dir / "original.webp").exists():
+                from scripts.orchestration.artifacts import validate_image
+                try:
+                    validate_image(original_dir / "original.webp")
+                    original_valid = True
+                except ValueError:
+                    original_valid = False
+                if not original_valid:
                     with Image.open(image) as source:
                         source.convert("RGB").save(original_dir / "original.webp", "WEBP", quality=90)
                 remaining = [stage["key"] for stage in self.jobs[job_id]["stages"] if stage["status"] != "succeeded"]

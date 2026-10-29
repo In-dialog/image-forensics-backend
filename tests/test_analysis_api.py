@@ -357,6 +357,43 @@ class AnalysisApiTests(unittest.TestCase):
         self.assertEqual(order, [job["id"] for job in jobs])
         self.assertEqual([self.manager.get(job["id"])["status"] for job in jobs], ["failed", "succeeded", "succeeded"])
 
+    def test_resume_repairs_corrupt_completed_extraction(self):
+        job = self.failed_job()
+        (self.manager.data_dir / job["id"] / "metadata.json").write_text('{"extracts":')
+        self.calls.clear()
+        self.runners["depth_map"] = self.record_stage("depth_map")
+        status, response = self.request("POST", "/jobs/resume", {"job_ids": [job["id"]]})
+        self.assertEqual(status, 202, response)
+        repaired = self.wait_job(job["id"])
+        self.assertEqual(repaired["status"], "succeeded")
+        self.assertEqual([call[0] for call in self.calls], ["extract_objects", "depth_map"])
+        self.assertTrue(any("needs repair" in line for line in repaired["logs"]))
+
+    def test_resume_rejects_corrupt_image_before_queuing(self):
+        job = self.failed_job()
+        image = next(self.manager.uploads.root.glob(job["id"] + ".*"))
+        image.write_bytes(b"not an image")
+        status, response = self.request("POST", "/jobs/resume", {"job_ids": [job["id"]]})
+        self.assertEqual(status, 400, response)
+        self.assertEqual(self.manager.queue, [])
+        self.assertEqual(self.manager.get(job["id"])["status"], "failed")
+
+    def test_resume_rejects_changed_input_even_if_still_a_valid_image(self):
+        job = self.failed_job()
+        image = next(self.manager.uploads.root.glob(job["id"] + ".*"))
+        Image.new("RGB", (12, 8), "blue").save(image)
+        status, response = self.request("POST", "/jobs/resume", {"job_ids": [job["id"]]})
+        self.assertEqual(status, 400, response)
+        self.assertIn("has changed", response["error"])
+
+    def test_resume_validates_profiles_of_previously_completed_stages(self):
+        job = self.failed_job()
+        path = self.manager.root / job["id"] / "prompts" / "object_detect.json"
+        path.write_text('{}')
+        status, response = self.request("POST", "/jobs/resume", {"job_ids": [job["id"]]})
+        self.assertEqual(status, 400, response)
+        self.assertEqual(self.manager.get(job["id"])["status"], "failed")
+
     def test_delete_removes_only_the_selected_unfinished_run(self):
         first, second = self.failed_job(), self.failed_job()
         checkpoint = self.manager.root / first["id"] / "checkpoints" / "sample.json"

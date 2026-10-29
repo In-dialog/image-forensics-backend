@@ -70,14 +70,18 @@ def execute_plan(
     before_synthetic: Callable[[], object] | None = None,
     checkpoint_dir: Path | None = None,
     cleanup: Callable[[], None] | None = None,
+    validate_outputs: Callable[[str, Path, Mapping], None] | None = None,
 ) -> Path:
     """Stop on raised errors; report progress before/after each backend call.
 
-    Some analysis runners handle individual item failures internally; those details
-    remain in their logs/output files. Completion here means the runner returned.
+    Production stages are complete only when their expected artifacts validate.
+    Injected runners can supply the same validator for offline contract tests.
     """
     validate_plan(plan)
     backend = runners if runners is not None else load_runners()
+    if validate_outputs is None and runners is None:
+        from scripts.orchestration.artifacts import validate_stage_outputs
+        validate_outputs = validate_stage_outputs
     from scripts.runtime.gpu import clear_exception_frames
     if cleanup is None:
         if runners is None:
@@ -105,6 +109,8 @@ def execute_plan(
                     validate_run_folder(folder)
                 else:
                     backend[call.key](run_folder=folder, **call.options)
+                if validate_outputs is not None:
+                    validate_outputs(call.key, folder, call.options)
         except BaseException as exc:
             clear_exception_frames(exc)
             try:

@@ -234,6 +234,17 @@ class StructuredExecutionTests(unittest.TestCase):
                 self.assertEqual(typed["criteria"][2]["type"], "boolean")
                 self.assertFalse((self.folder / filename).exists())
 
+    def test_empty_repaired_extraction_replaces_stale_description_and_ranking_items(self):
+        self.load_runners()
+        (self.folder / "metadata.json").write_text(json.dumps({"extracts": [], "source_image_path": str(self.image)}))
+        for relative, filename in (("scripts/executers/per_Item/run_image_description.py", "descriptions.v2.json"),
+                                   ("scripts/executers/global/rankings/run_rankings.py", "per_item_rankings.v2.json")):
+            (self.folder / filename).write_text(json.dumps({"items": [{"name": "stale"}]}))
+            module = load_module("empty_result_runner", relative)
+            module.execute(self.folder)
+            self.assertEqual(json.loads((self.folder / filename).read_text())["items"], [])
+        self.ollama.chat.assert_not_called()
+
     def test_description_runner_saves_all_answers_in_one_call(self):
         self.load_runners()
         self.prepare_item()

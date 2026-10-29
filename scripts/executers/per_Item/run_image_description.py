@@ -52,11 +52,12 @@ def execute(
         metadata = json.load(f)
     extracts = enumerate_analysis_items(run_folder, metadata)
     progress_steps("Describe items", "Save descriptions")
+    profile = resolve_profile("image_description", prompt_profile)
     if not extracts:
         start_step(1, total=0)
+        save_descriptions(run_folder, profile, [])
         return run_folder
 
-    profile = resolve_profile("image_description", prompt_profile)
     items: list[dict] = []
     source = original_image_path(run_folder, metadata)
     with vision_model_session(vision_model) as keep_alive:

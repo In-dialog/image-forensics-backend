@@ -30,6 +30,7 @@ warnings.filterwarnings("ignore", message="The module 'mediapipe' is not install
 
 from scripts.orchestration.progress import progress_steps, progress_items, start_step, skip_item
 from scripts.runtime.gpu import inference_call
+from scripts.configuration.store import atomic_json
 from scripts.utilities.save_stage_utils import METADATA_FILENAME, SEGMENTS_SUBFOLDER
 from scripts.utilities.image_utils import ensure_dir
 from scripts.utilities.pose_extraction_utils import (
@@ -111,6 +112,7 @@ Run OpenPose pose extraction per person segment; save pose map images and one po
         person_extracts = _person_extracts(metadata)
         if not person_extracts:
             start_step(2, total=0, unit="people")
+            atomic_json(run_dir / POSE_SUBFOLDER / POSE_JSON_FILENAME, {"items": []})
             print(f"Skip {run_dir}: no segments labeled person/people")
             continue
 
@@ -156,8 +158,7 @@ Run OpenPose pose extraction per person segment; save pose map images and one po
 
         start_step(3)
         out_path = out_dir / POSE_JSON_FILENAME
-        with open(out_path, "w", encoding="utf-8") as f:
-            json.dump({"items": items}, f, indent=2)
+        atomic_json(out_path, {"items": items})
         print(f"  Saved {out_path.name} ({len(items)} item(s))")
 
         # Update person_vision.json with pose image name per item (same metadata as segment/person vision)

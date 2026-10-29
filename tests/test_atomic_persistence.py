@@ -91,7 +91,10 @@ class AtomicPersistenceTests(unittest.TestCase):
         Image.new("RGB", (2, 2)).save(image)
         settings = default_settings()
         settings["selected_stages"] = ["extract_objects"]
-        with patch.object(manager, "_persist", side_effect=[None, sharing_error(5)]), patch("scripts.api.jobs.build_plan"), patch("scripts.api.jobs.execute_plan"), patch("sys.__stderr__", io.StringIO()):
+        with patch.object(manager, "_persist", side_effect=[None, sharing_error(5)]), \
+                patch.object(manager.recovery, "inputs", return_value=(image, settings, self.root / "prompts")), \
+                patch.object(manager.recovery, "completed_prefix", return_value=(0, None)), \
+                patch("scripts.api.jobs.build_plan"), patch("scripts.api.jobs.execute_plan"), patch("sys.__stderr__", io.StringIO()):
             manager._run(job["id"], image, settings, self.root / "prompts")
         self.assertIsNone(manager.active_job_id)
         self.assertEqual(job["status"], "succeeded")

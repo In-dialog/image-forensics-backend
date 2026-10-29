@@ -73,20 +73,7 @@ def _is_torch_device_mismatch_error(exc: Exception) -> bool:
         and "should be the same" in msg
     )
 
-JPEG_EXTENSIONS = {".jpg", ".jpeg"}
-
-# Execution order: TruFor (main), then the rest. Focal excluded from default pipeline.
-AVAILABLE_METHODS = [
-    "trufor",
-    "zero",
-    "splicebuster",
-    "noisesniffer",
-    "adaptive_cfa_net",
-    "exif_as_language",
-    "psccnet",
-]
-
-JPEG_ONLY_METHODS = {"zero"}
+from scripts.configuration.forensics import AVAILABLE_METHODS, JPEG_EXTENSIONS, JPEG_ONLY_METHODS
 
 METHOD_LABELS = {
     "zero": {

@@ -400,6 +400,9 @@ class SyntheticLifetimeTests(unittest.TestCase):
         error = [False]
 
         class Classifier:
+            def eval(self):
+                return self
+
             def __call__(self, image):
                 if error[0]:
                     raise ValueError("inference failed")

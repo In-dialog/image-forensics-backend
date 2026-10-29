@@ -23,7 +23,9 @@ for _ in range(6):
 else:
     raise RuntimeError("ensure_path.py not found above this file")
 
-from scripts.orchestration.progress import progress_steps, start_step
+from scripts.orchestration.progress import progress_steps, start_step, progress_activity
+from scripts.configuration.store import atomic_json
+from scripts.services.synthetic_inference_client import predict as predict_via_api
 from scripts.runtime.gpu import inference_call
 from scripts.runtime.ollama import prepare_torch_model
 from scripts.utilities.save_stage_utils import METADATA_FILENAME
@@ -69,6 +71,7 @@ def _predict_local(resolved_model_path: str, image_path: Path) -> tuple[float, f
 
     prepare_torch_model()
     classifier = _load_local_classifier(resolved_model_path)
+    classifier.eval()
     img = Image.open(image_path).convert("RGB")
     x = preprocess_image(img).unsqueeze(0)
     with torch.no_grad():
@@ -92,25 +95,13 @@ def _predict_via_api(
     *,
     api_url: str,
     model_path: str | None = None,
-    timeout_s: float = 30.0,
+    timeout_s: float = 1800.0,
 ) -> tuple[float, float]:
-    payload: dict[str, Any] = {"image_path": str(image_path)}
-    if model_path:
-        payload["model_path"] = model_path
-    body = json.dumps(payload).encode("utf-8")
-    req = urlrequest.Request(
-        _join_api_url(api_url, "/classify"),
-        data=body,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    with urlrequest.urlopen(req, timeout=timeout_s) as resp:
-        data = resp.read().decode("utf-8")
-    out = json.loads(data)
-    probs = out.get("probs", {})
-    real_prob = float(probs.get("real", 0.0))
-    synthetic_prob = float(probs.get("synthetic", 0.0))
-    return real_prob, synthetic_prob
+    def report(message):
+        print(f"Synthetic analysis: {message}")
+        progress_activity(message)
+    return predict_via_api(image_path, api_url=api_url, model_path=model_path,
+                           timeout_s=timeout_s, report=report)
 
 
 def execute(
@@ -150,7 +141,7 @@ def execute(
         except Exception as exc:
             raise RuntimeError(
                 f"Synthetic API unavailable at {api_url}: {exc}. "
-                "Start the optional service with python install/start_synthetic.py or run with --no-api."
+                "Start run_synthetic_api_server.bat or run with --no-api."
             ) from exc
 
     if not use_api:
@@ -195,8 +186,7 @@ def execute(
         }
         out_path = run_folder / SYNTHETIC_ANALYSIS_FILENAME
         start_step(3)
-        with open(out_path, "w", encoding="utf-8") as f:
-            json.dump(synthetic_object, f, indent=2, ensure_ascii=False)
+        atomic_json(out_path, synthetic_object)
         print(f"  AI Generated: {is_synthetic}, Confidence: {confidence}")
         print(f"  Wrote {SYNTHETIC_ANALYSIS_FILENAME}")
         written.append(run_folder)

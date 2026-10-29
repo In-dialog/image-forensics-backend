@@ -19,17 +19,17 @@ for _ in range(6):
 else:
     raise RuntimeError("ensure_path.py not found above this file")
 
-import torch
 from scripts.orchestration.progress import progress_steps, progress_items, start_step, skip_item, fail_item
 from scripts.utilities.save_stage_utils import METADATA_FILENAME
 from scripts.utilities.image_utils import ensure_dir
+from scripts.configuration.store import atomic_json
+from scripts.orchestration.artifacts import validate_forgery_entry
+from scripts.services.forgery_worker import run_isolated_method
 from scripts.extensions import (
     find_metadata_files,
     get_image_path_from_metadata,
     FORGERY_METHODS,
     FORGERY_METHOD_LABELS,
-    read_image_as_tensor,
-    run_forgery_method,
     forgery_score_from_output,
     save_heatmap,
     save_mask,
@@ -51,14 +51,18 @@ def _process_image(
     """Run all requested methods on a single image. Returns metadata dict."""
     progress_steps("Prepare image", "Run forensic checks", "Save findings")
     start_step(1)
-    image_tensor = read_image_as_tensor(image_path)
     results_meta: dict[str, Any] = dict(existing)
 
     for name in progress_items(methods, step=2, unit="checks", label=lambda name: FORGERY_METHOD_LABELS[name]["label"]):
-        if name in existing and "error" not in existing[name]:
-            skip_item()
-            print(f"  {name}: already done, skipping")
-            continue
+        if name in existing:
+            try:
+                validate_forgery_entry(out_dir.parent, name, existing[name])
+            except ValueError as exc:
+                print(f"  {name}: repairing incomplete saved result ({exc})")
+            else:
+                skip_item()
+                print(f"  {name}: verified saved result, skipping")
+                continue
 
         if should_skip_forgery_method(name, image_path):
             skip_item()
@@ -69,7 +73,7 @@ def _process_image(
         ensure_dir(method_dir)
         print(f"  Running {name}...")
         try:
-            result = run_forgery_method(name, image_tensor, device=device)
+            result = run_isolated_method(name, image_path, device=device)
         except Exception as exc:
             fail_item()
             print(f"  {name} failed: {exc}")
@@ -147,10 +151,9 @@ def execute(
         print(f"No {METADATA_FILENAME} found at {base}")
         return []
 
-    # Resolve "auto" (None) to cuda when available so GPU is used by default
-    if device is None:
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"Forgery detection device: {device}")
+    # Resolve automatic device selection inside each worker, keeping CUDA out
+    # of the orchestration process for this stage.
+    print(f"Forgery detection device: {device or 'auto'} (one process per method)")
 
     written: list[Path] = []
     for meta_path in meta_files:
@@ -166,15 +169,19 @@ def execute(
         results_path = run_dir / RESULTS_FILENAME
         existing: dict[str, Any] = {}
         if results_path.exists():
-            with open(results_path, "r", encoding="utf-8") as f:
-                existing = json.load(f)
+            try:
+                with open(results_path, "r", encoding="utf-8") as f:
+                    saved = json.load(f)
+                if isinstance(saved, dict):
+                    existing = saved
+            except (ValueError, OSError) as exc:
+                print(f"Rebuilding unreadable forensic results: {exc}")
 
         print(f"Forgery detection: {image_path}")
         results_meta = _process_image(image_path, out_dir, methods, existing, device=device)
         start_step(3)
 
-        with open(results_path, "w", encoding="utf-8") as f:
-            json.dump(results_meta, f, indent=2, ensure_ascii=False)
+        atomic_json(results_path, results_meta)
 
         print(f"  Wrote {RESULTS_FILENAME}")
         written.append(run_dir)
