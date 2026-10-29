@@ -47,9 +47,21 @@ class RunRecovery:
         # Validate all saved profiles, including stages that previously succeeded.
         plan = build_plan(self.data_dir / job["id"], image, keys, settings, prompts)
         validate_plan(plan)
+        # Older runs recorded completion after cleanup. The old allocation
+        # guard could reject a valid result, then block every retry at startup.
+        # Recover only this specific error, with full artifact/input validation;
+        # ordinary inference failures must never reuse potentially partial data.
+        allocation_guard_failure = bool(re.fullmatch(
+            r"GPU cleanup: [0-9]+\.[0-9]+ MiB of live tensors remain after the stage",
+            job.get("error") or "",
+        ))
+        recovered = []
+        def recovery_message():
+            return ("Resume validation: recovered completed outputs after GPU cleanup stopped the run: "
+                    + ", ".join(recovered) + ".") if recovered else None
         for index, (stage, call) in enumerate(zip(job["stages"], plan.stages)):
-            if stage["status"] != "succeeded":
-                return index, None
+            if stage["status"] != "succeeded" and not allocation_guard_failure:
+                return index, recovery_message()
             try:
                 validate_stage_outputs(call.key, plan.run_folder, call.options)
                 if call.key == "extract_objects":
@@ -60,8 +72,12 @@ class RunRecovery:
                     if (metadata["image_width"], metadata["image_height"]) != validate_image(image):
                         raise ValueError("Extraction dimensions do not match the saved input image")
             except (ValueError, OSError, TypeError, KeyError) as exc:
+                if stage["status"] != "succeeded":
+                    return index, recovery_message()
                 return index, f"Resume validation: {stage['label']} needs repair: {exc}. Re-running this stage and those after it."
-        return len(keys), None
+            if stage["status"] != "succeeded":
+                recovered.append(stage["label"])
+        return len(keys), recovery_message()
 
     def delete(self, job: dict, other_jobs: list[dict]):
         # Resolve every deletion target before changing anything. The settings and

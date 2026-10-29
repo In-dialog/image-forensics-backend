@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, List, Optional, Tuple, Union
 import weakref
 
-from scripts.runtime.gpu import release_after_call, release_cuda_memory
+from scripts.runtime.gpu import clear_model_caches, release_after_call, release_cuda_memory
 from scripts.runtime.ollama import prepare_torch_model
 
 import numpy as np
@@ -56,6 +56,10 @@ def _cleanup_sam_resources(
     Ensures CUDA cache is released even if init/inference failed midway.
     """
     if model is not None:
+        try:
+            clear_model_caches(model)
+        except Exception as exc:
+            print(f"SAM inference cache cleanup warning: {exc}")
         try:
             model.to("cpu")
         except Exception as exc:

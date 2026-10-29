@@ -23,6 +23,7 @@ from scripts.configuration.plan import build_plan
 from scripts.configuration.schema import default_settings, validate_settings
 from scripts.configuration.store import ConfigStore, atomic_json
 from scripts.orchestration.stages import STAGES
+from scripts.orchestration.execution import execute_plan
 from scripts.orchestration.progress import progress_steps, progress_items, start_step, skip_item, fail_item
 from scripts.prompting import default_profiles
 
@@ -368,6 +369,66 @@ class AnalysisApiTests(unittest.TestCase):
         self.assertEqual(repaired["status"], "succeeded")
         self.assertEqual([call[0] for call in self.calls], ["extract_objects", "depth_map"])
         self.assertTrue(any("needs repair" in line for line in repaired["logs"]))
+
+    def test_cleanup_failure_preserves_validated_stage_for_resume(self):
+        cleanup = Mock(side_effect=[None, RuntimeError("unload failed")])
+        with patch("scripts.api.jobs.execute_plan", side_effect=lambda *args, **kwargs:
+                   execute_plan(*args, **kwargs, cleanup=cleanup)):
+            status, response = self.submit()
+            self.assertEqual(status, 202, response)
+            job = self.wait_job(response["job"]["id"])
+        self.assertEqual(job["status"], "failed")
+        self.assertIn("Runtime cleanup after Extract Objects failed", job["error"])
+        self.assertEqual(job["completed_stages"], 1)
+        self.assertEqual([stage["status"] for stage in job["stages"]], ["succeeded", "skipped"])
+        self.calls.clear()
+        status, response = self.request("POST", "/jobs/resume", {"job_ids": [job["id"]]})
+        self.assertEqual(status, 202, response)
+        self.assertEqual(self.wait_job(job["id"])["status"], "succeeded")
+        self.assertEqual([call[0] for call in self.calls], ["depth_map"])
+
+    def test_resume_recovers_outputs_left_by_old_allocation_guard(self):
+        job = self.failed_job()
+        saved = self.manager.jobs[job["id"]]
+        saved.update(error="GPU cleanup: 115.9 MiB of live tensors remain after the stage",
+                     completed_stages=0, stage_key=None)
+        for stage in saved["stages"]:
+            stage["status"] = "skipped"
+        self.manager._persist(saved)
+        self.calls.clear()
+        self.runners["depth_map"] = self.record_stage("depth_map")
+        status, response = self.request("POST", "/jobs/resume", {"job_ids": [job["id"]]})
+        self.assertEqual(status, 202, response)
+        resumed = self.wait_job(job["id"])
+        self.assertEqual(resumed["status"], "succeeded")
+        self.assertEqual(resumed["completed_stages"], 2)
+        self.assertEqual([call[0] for call in self.calls], ["depth_map"])
+        self.assertTrue(any("recovered completed outputs" in line for line in resumed["logs"]))
+
+    def test_cleanup_guard_recovery_still_rejects_invalid_extraction(self):
+        job = self.failed_job()
+        saved = self.manager.jobs[job["id"]]
+        saved["error"] = "GPU cleanup: 115.9 MiB of live tensors remain after the stage"
+        saved["stages"][0]["status"] = "failed"
+        (self.manager.data_dir / job["id"] / "metadata.json").write_text('{}')
+        self.calls.clear()
+        self.runners["depth_map"] = self.record_stage("depth_map")
+        status, response = self.request("POST", "/jobs/resume", {"job_ids": [job["id"]]})
+        self.assertEqual(status, 202, response)
+        self.assertEqual(self.wait_job(job["id"])["status"], "succeeded")
+        self.assertEqual([call[0] for call in self.calls], ["extract_objects", "depth_map"])
+
+    def test_ordinary_inference_failure_does_not_reuse_unfinished_outputs(self):
+        job = self.failed_job()
+        saved = self.manager.jobs[job["id"]]
+        saved["error"] = "Extract Objects failed: incomplete inference"
+        saved["stages"][0]["status"] = "failed"
+        self.calls.clear()
+        self.runners["depth_map"] = self.record_stage("depth_map")
+        status, response = self.request("POST", "/jobs/resume", {"job_ids": [job["id"]]})
+        self.assertEqual(status, 202, response)
+        self.assertEqual(self.wait_job(job["id"])["status"], "succeeded")
+        self.assertEqual([call[0] for call in self.calls], ["extract_objects", "depth_map"])
 
     def test_resume_rejects_corrupt_image_before_queuing(self):
         job = self.failed_job()

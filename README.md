@@ -13,7 +13,7 @@ Start this backend to run analyses. To browse the included example database, use
 - **Descriptions and rankings:** answer configurable questions and evaluate image-level and per-item criteria using structured results.
 - **Progress and recovery:** report stages and item progress, save checkpoints, and resume failed or interrupted jobs.
 - **Optional forensic stages:** add PhotoHolmes forgery analysis or Nonescape synthetic-image detection during installation.
-- **GPU resource management:** release finished models between stages. Each forensic check runs in its own process, which exits before the next check to free native CUDA allocations as well as model weights.
+- **GPU resource management:** release finished models, SAM inference caches, and CUDA math workspaces between stages. Each forensic check runs in its own process, which exits before the next check to free native CUDA allocations as well as model weights.
 
 The source download does not contain model weights or a preinstalled Python environment. Installation prepares the software and models on your computer.
 
@@ -86,6 +86,8 @@ Press **Ctrl+C** in this terminal to stop. Next time, use Start again. The backe
 Results are saved under `data/` by default. The API reports progress and previews and supplies completed result bundles to clients.
 
 Completed stages and validated model responses are checkpointed. Resume checks the saved input, settings, prompts, images, per-item results, rankings, and forensic outputs. Missing or corrupt results restart that stage and the stages after it; valid earlier work is preserved. A failed or interrupted run can be resumed through the connected frontend; nothing resumes automatically after restarting.
+
+Validated stage outputs remain available for Resume even if GPU cleanup fails afterward. Runs stopped by the earlier GPU allocation guard also recover their completed outputs after validation. Restart the backend after updating to load the fix, then select **Resume** in the frontend.
 
 Synthetic model preparation and inference run as a reconnectable task. The frontend receives progress while the model loads, and Resume reuses the active task or completed prediction while the synthetic service stays running. This avoids the previous 30-second inference request timeout. The classifier is released after each task. After updating, restart the backend and any separately started synthetic service before resuming.
 

@@ -202,6 +202,8 @@ class JobManager:
                 for job, first, *_ in prepared:
                     job.update(status="queued", error=None, result_id=None, stage_key=None, completed_stages=first,
                                resume_attempts=job.get("resume_attempts", 0) + 1)
+                    for stage in job["stages"][:first]:
+                        stage["status"] = "succeeded"
                     for stage in job["stages"][first:]:
                         stage["status"] = "pending"
                         stage.pop("substeps", None)
@@ -335,6 +337,8 @@ class JobManager:
                     first, repair = self.recovery.completed_prefix(job, image, settings, prompt_dir)
                     if repair:
                         self._append_log(job_id, repair)
+                    for stage in job["stages"][:first]:
+                        stage["status"] = "succeeded"
                     for stage in job["stages"][first:]:
                         stage["status"] = "pending"
                     job["completed_stages"] = first

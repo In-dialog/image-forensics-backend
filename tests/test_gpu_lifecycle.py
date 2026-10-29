@@ -14,6 +14,7 @@ import unittest
 import weakref
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import nullcontext
+from functools import lru_cache, wraps
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -29,7 +30,49 @@ class Resource:
     pass
 
 
+def hidden_cache(function):
+    """Match Transformers' compilation-aware cache wrapper."""
+    cached = lru_cache(maxsize=4)(function)
+
+    @wraps(function)
+    def wrapped(*args, **kwargs):
+        return cached(*args, **kwargs)
+    return wrapped
+
+
+class CachedModel:
+    @hidden_cache
+    def forward(self):
+        return Resource()
+
+    @lru_cache(maxsize=1)
+    def coordinates(self):
+        return Resource()
+
+    def to(self, device):
+        pass
+
+    def modules(self):
+        return iter((self,))
+
+
 class GpuLifetimeTests(unittest.TestCase):
+    def test_model_caches_release_outputs_and_owner_even_behind_wrappers(self):
+        class InheritedModel(CachedModel):
+            pass
+
+        model = InheritedModel()
+        owner = weakref.ref(model)
+        results = [weakref.ref(model.forward()), weakref.ref(model.coordinates())]
+        self.assertTrue(all(ref() is not None for ref in results))
+        gpu.clear_model_caches(model)
+        self.assertTrue(all(ref() is None for ref in results))
+        # Clearing caches is reusable and does not break subsequent inference.
+        self.assertIsInstance(model.forward(), Resource)
+        gpu.clear_model_caches(model)
+        del model
+        self.assertIsNone(owner())
+
     def test_success_releases_locals_and_cycles_before_allocator_cleanup(self):
         refs = []
 
@@ -123,12 +166,34 @@ class GpuLifetimeTests(unittest.TestCase):
         cuda.empty_cache.assert_called_once()
         cuda.ipc_collect.assert_called_once()
 
-    def test_stage_guard_detects_live_tensor_allocations(self):
+    def test_allocator_counters_alone_do_not_fail_completed_stages(self):
         cuda = self.cuda()
         cuda.memory_allocated.return_value = 1024
         with patch.dict(sys.modules, {"torch": types.SimpleNamespace(cuda=cuda)}):
-            with self.assertRaisesRegex(RuntimeError, "live tensors remain"):
+            for report in (False, True):
+                gpu.release_cuda_memory(strict=True, report=report)
+
+    def test_library_workspaces_are_released_before_emptying_allocator_cache(self):
+        cuda = self.cuda()
+        events = []
+        cuda.empty_cache.side_effect = lambda: events.append("allocator")
+        torch = types.SimpleNamespace(
+            cuda=cuda, clear_autocast_cache=lambda: events.append("autocast"),
+            _C=types.SimpleNamespace(_cuda_clearCublasWorkspaces=lambda: events.append("cuBLAS")),
+        )
+        with patch.dict(sys.modules, {"torch": torch}):
+            gpu.release_cuda_memory(strict=True)
+        self.assertEqual(events, ["autocast", "cuBLAS", "allocator"])
+
+    def test_workspace_release_error_is_reported_but_remaining_cleanup_runs(self):
+        cuda = self.cuda()
+        torch = types.SimpleNamespace(cuda=cuda, _C=types.SimpleNamespace(
+            _cuda_clearCublasWorkspaces=Mock(side_effect=RuntimeError("workspace release failed"))))
+        with patch.dict(sys.modules, {"torch": torch}):
+            with self.assertRaisesRegex(RuntimeError, "workspace release failed"):
                 gpu.release_cuda_memory(strict=True, report=True)
+        cuda.empty_cache.assert_called_once()
+        cuda.ipc_collect.assert_called_once()
 
 
 class OllamaHandoffTests(unittest.TestCase):
@@ -210,8 +275,8 @@ class SamLifetimeTests(unittest.TestCase):
         self.sam.prepare_torch_model = Mock()
 
     def test_unload_drops_wrapper_and_local_references(self):
-        model = Resource()
-        model.to = lambda device: None
+        model = CachedModel()
+        result = weakref.ref(model.forward())
         reference = weakref.ref(model)
         loaded = self.sam.Sam3Loaded(model, Resource(), "cuda:0")
         self.sam._LIVE_SAM3[id(loaded)] = loaded
@@ -220,6 +285,7 @@ class SamLifetimeTests(unittest.TestCase):
         self.assertIsNone(loaded.model)
         self.assertIsNone(loaded.processor)
         self.assertIsNone(reference())
+        self.assertIsNone(result())
         self.assertEqual(len(self.sam._LIVE_SAM3), 0)
 
     def test_partial_gpu_load_failure_does_not_retain_model(self):
@@ -246,6 +312,35 @@ class SamLifetimeTests(unittest.TestCase):
 
 @unittest.skipUnless(os.environ.get("CHECK_GPU_LIFECYCLE") == "1", "opt-in GPU allocation smoke test")
 class CudaAllocationSmokeTests(unittest.TestCase):
+    def test_matrix_inference_releases_library_workspaces_on_success_and_failure(self):
+        import torch
+        if not torch.cuda.is_available():
+            self.skipTest("CUDA unavailable")
+        if not hasattr(torch._C, "_cuda_clearCublasWorkspaces"):
+            self.skipTest("PyTorch has no workspace-release hook")
+        gpu.release_cuda_memory()
+        baseline = torch.cuda.memory_allocated()
+
+        @gpu.inference_call
+        def inference(fail=False):
+            with torch.autocast("cuda", dtype=torch.float16):
+                layer = torch.nn.Linear(1024, 1024, device="cuda")
+                data = torch.ones(1024, 1024, device="cuda")
+                result = layer(data)
+                if fail:
+                    raise RuntimeError("matrix inference failed")
+                return result.mean().item()
+
+        for fail in (False, True, False):
+            if fail:
+                with self.assertRaisesRegex(RuntimeError, "matrix inference failed"):
+                    inference(True)
+            else:
+                inference()
+            gpu.release_cuda_memory(strict=True, report=True)
+            self.assertEqual(torch.cuda.memory_allocated(), baseline)
+            self.assertEqual(torch.cuda.memory_reserved(), baseline)
+
     def test_success_failure_and_next_inference_return_allocations_to_baseline(self):
         import torch
         if not torch.cuda.is_available():
@@ -294,10 +389,30 @@ class StageBoundaryTests(unittest.TestCase):
 
     def test_cleanup_failure_blocks_the_next_stage(self):
         later = Mock()
-        with self.assertRaisesRegex(RuntimeError, "still resident"):
+        progress = Mock()
+        with self.assertRaisesRegex(RuntimeError, "Runtime cleanup after Depth Map failed: still resident"):
             execute_plan(self.plan, runners={"depth_map": Mock(), "image_description": later},
+                         on_progress=progress,
                          cleanup=Mock(side_effect=[None, RuntimeError("still resident")]))
         later.assert_not_called()
+        self.assertEqual([call.args for call in progress.call_args_list], [
+            ("depth_map", 1, 2, "running"), ("depth_map", 1, 2, "finished"),
+        ])
+
+    def test_startup_cleanup_failure_does_not_mark_any_stage_running_or_complete(self):
+        runner, progress = Mock(), Mock()
+        with self.assertRaisesRegex(RuntimeError, "Runtime cleanup before analysis failed"):
+            execute_plan(self.plan, runners={"depth_map": runner}, on_progress=progress,
+                         cleanup=Mock(side_effect=RuntimeError("unload failed")))
+        runner.assert_not_called()
+        progress.assert_not_called()
+
+    def test_invalid_outputs_are_not_marked_complete(self):
+        progress = Mock()
+        with self.assertRaisesRegex(RuntimeError, "Depth Map failed: incomplete outputs"):
+            execute_plan(self.plan, runners={"depth_map": Mock()}, on_progress=progress,
+                         validate_outputs=Mock(side_effect=ValueError("incomplete outputs")))
+        progress.assert_called_once_with("depth_map", 1, 2, "running")
 
     def test_stage_failure_clears_tensor_locals_before_cleanup_and_keeps_original_error(self):
         refs = []

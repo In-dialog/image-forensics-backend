@@ -90,7 +90,11 @@ def execute_plan(
         else:
             # Injected runners also support offline tests without services.
             cleanup = lambda: None
-    cleanup()
+    try:
+        cleanup()
+    except Exception as exc:
+        clear_exception_frames(exc)
+        raise RuntimeError(f"Runtime cleanup before analysis failed: {exc}") from exc
     folder = plan.run_folder
     total = len(plan.stages)
     for index, call in enumerate(plan.stages, 1):
@@ -111,6 +115,10 @@ def execute_plan(
                     backend[call.key](run_folder=folder, **call.options)
                 if validate_outputs is not None:
                     validate_outputs(call.key, folder, call.options)
+            # Validated artifacts remain reusable even if the subsequent GPU
+            # handoff fails. Persist completion before attempting that handoff.
+            if on_progress:
+                on_progress(call.key, index, total, "finished")
         except BaseException as exc:
             clear_exception_frames(exc)
             try:
@@ -122,7 +130,9 @@ def execute_plan(
             raise RuntimeError(f"{label} failed: {exc}") from exc
         else:
             # The runner has returned; its model/tensor locals can be freed.
-            cleanup()
-        if on_progress:
-            on_progress(call.key, index, total, "finished")
+            try:
+                cleanup()
+            except Exception as exc:
+                clear_exception_frames(exc)
+                raise RuntimeError(f"Runtime cleanup after {label} failed: {exc}") from exc
     return folder
