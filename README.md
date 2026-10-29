@@ -1,5 +1,7 @@
 # Image Forensics Analysis — backend
 
+**[Demo](https://forensic-image-analysis-demo.pages.dev/results/)**
+
 **Frontend:** [image-forensics-frontend](https://github.com/In-dialog/image-forensics-frontend)
 
 The local analysis engine for Image Forensics Analysis. It detects and segments objects, examines each object in its scene, describes evidence, and produces configurable rankings and image-analysis outputs.
@@ -157,7 +159,7 @@ Add `--group sam3` to retry just SAM3, or use `depth`, `pose`, `saliency`, `olla
 | NVIDIA/CUDA is unavailable | Update the driver using NVIDIA's official tools and retry, or explicitly use `--profile cpu`. CPU mode is slower. |
 | Missing Ollama model | Finish model preparation using the command above, then start the backend again. |
 | Port 8766 is already in use | A backend may already be running. Keep one instance; close the older terminal before starting another. |
-| The website cannot find the backend | Keep the backend terminal open, check for the API-ready message, then select **Try again** in the local website. The Cloudflare-hosted viewer does not connect to your computer's backend. |
+| The website cannot find the backend | Keep the backend terminal open, check for the API-ready message, then select **Try again** in the local website. |
 | The Start window closes immediately | Open PowerShell in the backend folder and run `.\Start.cmd` there to keep the error visible. |
 | An optional forensic package fails to build | Use the core installation first. Native add-ons can require a C/C++ compiler and JPEG development libraries. |
 
