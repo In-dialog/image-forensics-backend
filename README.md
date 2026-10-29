@@ -89,6 +89,8 @@ Completed stages and validated model responses are checkpointed. Resume checks t
 
 Validated stage outputs remain available for Resume even if GPU cleanup fails afterward. Runs stopped by the earlier GPU allocation guard also recover their completed outputs after validation. Restart the backend after updating to load the fix, then select **Resume** in the frontend.
 
+On Windows, closing the **Start.cmd** terminal stops the backend and the service processes it launched, including synthetic and forensic workers. Independently started services stay under their own launcher. Interrupted analyses remain available for Resume after starting the backend again.
+
 Synthetic model preparation and inference run as a reconnectable task. The frontend receives progress while the model loads, and Resume reuses the active task or completed prediction while the synthetic service stays running. This avoids the previous 30-second inference request timeout. The classifier is released after each task. After updating, restart the backend and any separately started synthetic service before resuming.
 
 Before updating, stop the backend and back up `data/` including its hidden job/input folders, `scripts/configuration/settings.json`, and `.install-state.json`. Update the source in the existing project location, preserve those private files, and rerun Install with the same optional-feature choices.

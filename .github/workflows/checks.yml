@@ -44,6 +44,8 @@ jobs:
         run: python -B -S -m unittest discover -s tests -p test_stage_progress.py
       - name: Owned service lifecycle
         run: python -B -S -m unittest discover -s tests -p test_synthetic_lifecycle.py
+      - name: Windows launcher shutdown
+        run: python -B -S -m unittest discover -s tests -p test_windows_launcher.py
       - name: Private Linux runtime download and extraction safety
         run: python -B -S -m unittest discover -s tests -p test_ollama_runtime.py
       - name: Pipeline contracts

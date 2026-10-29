@@ -6,5 +6,5 @@ if not exist ".venv\Scripts\python.exe" (
     pause
     exit /b 1
 )
-".venv\Scripts\python.exe" -B install\start.py %*
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0install\start.ps1" %*
 exit /b %ERRORLEVEL%
