@@ -1,5 +1,7 @@
 # Image Forensics Analysis — backend
 
+**Frontend:** [image-forensics-frontend](https://github.com/In-dialog/image-forensics-frontend)
+
 The local analysis engine for Image Forensics Analysis. It detects and segments objects, examines each object in its scene, describes evidence, and produces configurable rankings and image-analysis outputs.
 
 This repository is independent of the web interface. It contains source code and tests, **not model weights, previous analyses, accounts, or a Python environment**.
