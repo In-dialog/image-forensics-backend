@@ -8,6 +8,9 @@ from pathlib import Path
 from typing import Any, List, Optional, Tuple, Union
 import weakref
 
+from scripts.runtime.gpu import release_after_call, release_cuda_memory
+from scripts.runtime.ollama import prepare_torch_model
+
 import numpy as np
 from PIL import Image
 
@@ -52,19 +55,12 @@ def _cleanup_sam_resources(
     Best-effort SAM cleanup for error paths and normal unloads.
     Ensures CUDA cache is released even if init/inference failed midway.
     """
-    import gc
-
     if model is not None:
-        del model
-    if processor is not None:
-        del processor
-    gc.collect()
-    if device == "cuda":
         try:
-            import torch
-            torch.cuda.empty_cache()
-        except ImportError:
-            pass
+            model.to("cpu")
+        except Exception as exc:
+            print(f"SAM offload warning: {exc}")
+    release_cuda_memory()
 
 
 def is_valid_box(
@@ -91,6 +87,7 @@ def _resize_mask_to(mask: np.ndarray, target_w: int, target_h: int) -> np.ndarra
     return np.array(pil, dtype=np.float64) / 255.0
 
 
+@release_after_call
 def load_sam3(
     *,
     model_id: str = DEFAULT_MODEL_ID,
@@ -109,6 +106,7 @@ def load_sam3(
     if device is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
 
+    prepare_torch_model()
     model = None
     processor = None
     try:
@@ -123,6 +121,7 @@ def load_sam3(
         raise
 
 
+@release_after_call
 def unload_sam3(loaded: Sam3Loaded) -> None:
     """
     Release the loaded model and processor so memory can be freed.
@@ -161,6 +160,7 @@ def unload_all_sam3() -> int:
     return count
 
 
+@release_after_call
 def extract_by_prompt(
     prompt: str,
     image: Path | str | Image.Image,
@@ -207,6 +207,7 @@ def extract_by_prompt(
         processor = model_and_processor.processor
         device = model_and_processor.device
     else:
+        prepare_torch_model()
         if device is None:
             device = "cuda" if torch.cuda.is_available() else "cpu"
         model = None

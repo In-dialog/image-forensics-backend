@@ -96,6 +96,17 @@ class SyntheticApiConfig:
     working_directory: Path
 
 
+def _startup_failure(message: str, log: Path) -> RuntimeError:
+    try:
+        with log.open("rb") as source:
+            source.seek(0, 2)
+            source.seek(max(0, source.tell() - 6000))
+            detail = source.read().decode("utf-8", errors="replace").strip()
+    except OSError:
+        detail = "Startup output could not be read."
+    return RuntimeError(f"{message}\n{detail}\nStartup log: {log}")
+
+
 def is_healthy(url: str) -> bool:
     try:
         with urllib.request.urlopen(f"{url.rstrip('/')}/health", timeout=2) as response:
@@ -139,11 +150,20 @@ def ensure_available(config: SyntheticApiConfig) -> bool:
     with _ownership_lock:
         if _closing:
             raise RuntimeError("The analysis backend is shutting down; no synthetic service will be started.")
-        process = subprocess.Popen(
-            argv, cwd=config.working_directory, shell=shell, env=environment,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-            start_new_session=not IS_WINDOWS,
-        )
+        log = config.working_directory / ".runtime" / "synthetic-api.log"
+        log.parent.mkdir(parents=True, exist_ok=True)
+        environment = dict(os.environ if environment is None else environment,
+                           PYTHONUNBUFFERED="1", PYTHONUTF8="1")
+        with log.open("wb") as output:
+            try:
+                process = subprocess.Popen(
+                    argv, cwd=config.working_directory, shell=shell, env=environment,
+                    stdout=output, stderr=subprocess.STDOUT,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                    start_new_session=not IS_WINDOWS,
+                )
+            except OSError as exc:
+                raise RuntimeError(f"Could not start Synthetic API with {config.start_command}: {exc}") from exc
         _owned_processes.append(process)
     try:
         deadline = time.monotonic() + config.timeout
@@ -157,9 +177,9 @@ def ensure_available(config: SyntheticApiConfig) -> bool:
                         raise RuntimeError("The analysis backend shut down while the synthetic service was starting.")
                 return True
             if process.poll() is not None:
-                raise RuntimeError(f"Synthetic API exited before becoming ready (exit code {process.returncode}).")
+                raise _startup_failure(f"Synthetic API exited before becoming ready (exit code {process.returncode}).", log)
             time.sleep(0.4)
-        raise RuntimeError(f"Synthetic API not ready after {config.timeout:g}s at {config.url}.")
+        raise _startup_failure(f"Synthetic API not ready after {config.timeout:g}s at {config.url}.", log)
     except BaseException:
         _release_owned(process)
         raise

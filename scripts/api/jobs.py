@@ -77,7 +77,7 @@ class _WorkerLog(io.TextIOBase):
 def runtime_cleanup():
     # Keep importing this module, serving config, and validating uploads free of ML imports.
     from scripts.utilities.runtime_cleanup import cleanup_runtime
-    cleanup_runtime(cuda_reset=True)
+    cleanup_runtime(report=True)
 
 
 class JobManager:

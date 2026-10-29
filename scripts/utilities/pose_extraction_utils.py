@@ -6,6 +6,9 @@ import json
 from pathlib import Path
 from typing import Any, List, Optional
 
+from scripts.runtime.gpu import inference_call, release_after_call
+from scripts.runtime.ollama import prepare_torch_model
+
 from PIL import Image
 
 # Optional at import; required when running
@@ -51,6 +54,7 @@ def _resize_for_detect(image: Image.Image, max_longer_side: Optional[int]) -> Im
     return image.resize((max(64, new_w), max(64, new_h)), Image.Resampling.LANCZOS)
 
 
+@release_after_call
 def load_detector(
     model_id: str = "lllyasviel/Annotators",
     device: Optional[str] = None,
@@ -60,6 +64,7 @@ def load_detector(
         raise ImportError("torch and controlnet_aux are required for pose extraction")
     if device is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
+    prepare_torch_model()
     detector = OpenposeDetector.from_pretrained(model_id)
     detector = detector.to(device)
     return detector, device
@@ -111,6 +116,7 @@ def pose_result_to_json(
     return {"image_width": image_width, "image_height": image_height, "people": people}
 
 
+@release_after_call
 def extract_pose_and_poses(
     image_path: Path,
     detector: Any,
@@ -143,6 +149,7 @@ def extract_pose_and_poses(
     return pose_pil, poses, W, H
 
 
+@inference_call
 def extract_pose(
     image_path: Path,
     detector: Any,
@@ -173,6 +180,7 @@ def extract_pose(
     return Image.fromarray(pose_image)
 
 
+@inference_call
 def run_pose_extraction_and_save(
     image_path: Path,
     output_dir: Path,

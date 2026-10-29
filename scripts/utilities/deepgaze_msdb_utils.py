@@ -4,6 +4,8 @@ Reusable by tests and by the run_deepgaze_msdb executor. Uses image_utils.resize
 """
 import io
 from pathlib import Path
+from scripts.runtime.gpu import inference_call, release_cuda_memory
+from scripts.runtime.ollama import prepare_torch_model
 from scripts.orchestration.progress import progress_steps, progress_items, progress_activity, start_step
 
 import numpy as np
@@ -154,6 +156,7 @@ def save_overlay(
     Image.open(buf).convert("RGB").save(out_path, "WEBP", quality=90)
 
 
+@inference_call
 def run_deepgaze_msdb(
     image_path: Path,
     *,
@@ -184,6 +187,7 @@ def run_deepgaze_msdb(
     rgb = np.array(img, dtype=np.uint8)
     h, w, _ = rgb.shape
 
+    prepare_torch_model()
     centerbias = np.zeros((h, w), dtype=np.float32)
     centerbias = centerbias - logsumexp_np(centerbias)
     centerbias_tensor = torch.tensor(centerbias[None, ...], dtype=torch.float32, device=device)
@@ -223,6 +227,8 @@ def run_deepgaze_msdb(
         )[0, 0]
 
     log_density_np = log_density.detach().cpu().numpy()
+    del model, image_tensor, centerbias_tensor, log_density
+    release_cuda_memory()
     m = np.max(log_density_np)
     prob = np.exp(log_density_np - m)
     prob = prob / (prob.sum() + 1e-12)

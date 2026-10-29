@@ -3,6 +3,7 @@ from pathlib import Path
 import importlib.util
 import signal
 import sys
+import tempfile
 import types
 import unittest
 from unittest.mock import Mock, call, patch
@@ -14,7 +15,10 @@ class SyntheticLifecycleTests(unittest.TestCase):
     def setUp(self):
         self.assertEqual(client._owned_processes, [])
         client.begin_service_session()
-        self.config = client.SyntheticApiConfig("http://127.0.0.1:8765", True, "trusted-foreground-command", 1, Path.cwd())
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        self.config = client.SyntheticApiConfig("http://127.0.0.1:8765", True, "trusted-foreground-command", 1, self.root)
         self.process = Mock(pid=43210, returncode=0)
         self.process.poll.return_value = None
         self.process.wait.return_value = 0
@@ -98,7 +102,9 @@ class SyntheticLifecycleTests(unittest.TestCase):
             self.assertEqual(kill.call_args_list, [call(43210, signal.SIGTERM), call(43210, client.FORCE_KILL)])
 
     def test_shipped_launcher_uses_isolated_python_directly(self):
-        root = Path(__file__).resolve().parents[1]
+        root = self.root
+        (root / "install").mkdir()
+        (root / "install/start_synthetic.py").touch()
         config = client.SyntheticApiConfig(self.config.url, True, str(root / "install/start_synthetic.py"), 1, root)
         direct = ["isolated-python", "-B", "synthetic_api_server.py"]
         with patch("install.start_synthetic.service_command", return_value=(direct, {"SAFE": "environment"})), \
@@ -107,7 +113,7 @@ class SyntheticLifecycleTests(unittest.TestCase):
             self.assertTrue(client.ensure_available(config))
             self.assertEqual(spawn.call_args.args[0], direct)
             self.assertFalse(spawn.call_args.kwargs["shell"])
-            self.assertEqual(spawn.call_args.kwargs["env"], {"SAFE": "environment"})
+            self.assertEqual(spawn.call_args.kwargs["env"], {"SAFE": "environment", "PYTHONUNBUFFERED": "1", "PYTHONUTF8": "1"})
 
     def test_server_close_always_stops_owned_services(self):
         # Execute the real server module under an isolated name. The image/job

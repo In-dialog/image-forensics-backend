@@ -10,6 +10,9 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
+from scripts.runtime.gpu import clear_exception_frames, inference_call, release_cuda_memory
+from scripts.runtime.ollama import prepare_torch_model
+
 import contextlib
 import cv2
 import numpy as np
@@ -239,12 +242,14 @@ def tensor_to_numpy(t: torch.Tensor | np.ndarray | None) -> np.ndarray | None:
 
 # ── Method execution ──────────────────────────────────────────────────────────
 
+@inference_call
 def run_method(
     method_name: str,
     image_tensor: torch.Tensor,
     device: str | None = None,
 ) -> dict[str, Any]:
     """Run a single PhotoHolmes method and return raw numpy results."""
+    prepare_torch_model()
     if device is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
     # Move image to target device so preprocessing and model run on GPU when device is cuda
@@ -283,10 +288,15 @@ def run_method(
             # for this specific mismatch.
             if device != "cpu" and _is_torch_device_mismatch_error(exc):
                 print("    adaptive_cfa_net CUDA mismatch detected, retrying on CPU...")
-                preprocessed_cpu = _preprocessed_to_device(preprocessed, "cpu")
+                preprocessed = _preprocessed_to_device(preprocessed, "cpu")
+                image_tensor = image_tensor.cpu()
+                image_data = {"image": image_tensor}
+                method = None
+                clear_exception_frames(exc)
+                release_cuda_memory()
                 with _torch_load_weights_only_false():
                     method_cpu = _to_device(AdaptiveCFANet(weights=str(wdir / "weights.pth")), "cpu")
-                result = method_cpu.benchmark(**preprocessed_cpu)
+                result = method_cpu.benchmark(**preprocessed)
             else:
                 raise
 
@@ -336,10 +346,15 @@ def run_method(
         except RuntimeError as exc:
             if device != "cpu" and _is_torch_device_mismatch_error(exc):
                 print("    psccnet CUDA mismatch detected, retrying on CPU...")
-                preprocessed_cpu = _preprocessed_to_device(preprocessed, "cpu")
+                preprocessed = _preprocessed_to_device(preprocessed, "cpu")
+                image_tensor = image_tensor.cpu()
+                image_data = {"image": image_tensor}
+                method = None
+                clear_exception_frames(exc)
+                release_cuda_memory()
                 with _torch_load_weights_only_false():
                     method_cpu = _to_device(PSCCNet(weights=weights), "cpu")
-                result = method_cpu.benchmark(**preprocessed_cpu)
+                result = method_cpu.benchmark(**preprocessed)
             else:
                 raise
 

@@ -20,6 +20,7 @@ else:
     raise RuntimeError("ensure_path.py not found above this file")
 
 from scripts.orchestration.progress import progress_steps, progress_items, start_step
+from scripts.runtime.gpu import release_after_call
 from scripts.utilities import load_sam3, unload_sam3
 from scripts.extensions import (
     DETECTION_GROUPS,
@@ -60,6 +61,7 @@ def _unique_labels(calls: List[Tuple[str, str, tuple[int, int, int, int] | None]
     return out
 
 
+@release_after_call
 def run_extract_objects(
     image_path: Path,
     *,
@@ -87,7 +89,7 @@ def run_extract_objects(
     print_raw_vision_response: bool = False,
     debug_vision_logs: bool = False,
     load_sam_before: bool = False,
-    unload_sam_after: bool = False,
+    unload_sam_after: bool = True,
     device: str | None = None,
     detail_dir: Path | None = None,
 ) -> Tuple[List[Tuple[str, str, Sam3Extract]], List[str], List[Tuple[str, str, tuple[int, int, int, int] | None]]]:
@@ -228,7 +230,7 @@ def execute(
     print_raw_vision_response: bool = False,
     debug_vision_logs: bool = False,
     load_sam_before: bool = False,
-    unload_sam_after: bool = False,
+    unload_sam_after: bool = True,
     device: str | None = None,
     base_dir: Path | str | None = None,
     save_vision_overlay: bool = True,

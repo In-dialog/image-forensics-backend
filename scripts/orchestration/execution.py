@@ -69,6 +69,7 @@ def execute_plan(
     on_subprogress: Callable[[str, dict], None] | None = None,
     before_synthetic: Callable[[], object] | None = None,
     checkpoint_dir: Path | None = None,
+    cleanup: Callable[[], None] | None = None,
 ) -> Path:
     """Stop on raised errors; report progress before/after each backend call.
 
@@ -77,6 +78,15 @@ def execute_plan(
     """
     validate_plan(plan)
     backend = runners if runners is not None else load_runners()
+    from scripts.runtime.gpu import clear_exception_frames
+    if cleanup is None:
+        if runners is None:
+            from scripts.utilities.runtime_cleanup import cleanup_runtime
+            cleanup = lambda: cleanup_runtime(strict=True, report=True)
+        else:
+            # Injected runners also support offline tests without services.
+            cleanup = lambda: None
+    cleanup()
     folder = plan.run_folder
     total = len(plan.stages)
     for index, call in enumerate(plan.stages, 1):
@@ -95,8 +105,18 @@ def execute_plan(
                     validate_run_folder(folder)
                 else:
                     backend[call.key](run_folder=folder, **call.options)
-        except Exception as exc:
+        except BaseException as exc:
+            clear_exception_frames(exc)
+            try:
+                cleanup()
+            except Exception as cleanup_error:
+                print(f"Runtime cleanup warning: {cleanup_error}")
+            if not isinstance(exc, Exception):
+                raise
             raise RuntimeError(f"{label} failed: {exc}") from exc
+        else:
+            # The runner has returned; its model/tensor locals can be freed.
+            cleanup()
         if on_progress:
             on_progress(call.key, index, total, "finished")
     return folder

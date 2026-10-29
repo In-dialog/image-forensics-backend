@@ -14,8 +14,19 @@ repeat_last_n, presence_penalty, seed (see ollama-python _types.Options). Thinki
 import logging
 import json
 from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Any, Callable
+
+from scripts.runtime.gpu import release_cuda_memory
+from scripts.runtime.ollama import offload_model, offload_all_models
+
+_SESSION_MODEL: ContextVar[str | None] = ContextVar("vision_session_model", default=None)
+
+
+def _prepare_vision_model(model: str) -> None:
+    release_cuda_memory()
+    offload_all_models(except_model=model)
 
 # PhotoHolmes initializes root logging at INFO, which makes httpx print every Ollama POST.
 logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -217,7 +228,14 @@ def vision_chat(
         chat_kwargs["think"] = think_value
 
     # Options must be top-level (Ollama API); do not put options inside message dicts.
-    response = ollama.chat(**chat_kwargs)
+    if _SESSION_MODEL.get() != model:
+        _prepare_vision_model(model)
+    try:
+        response = ollama.chat(**chat_kwargs)
+    except BaseException:
+        if _SESSION_MODEL.get() != model:
+            offload_model(model, strict=False)
+        raise
     if debug_raw_response:
         print(f"Vision raw response payload: {response}")
 
@@ -308,20 +326,20 @@ def offload_vision_model(model: str = "qwen3-vl:8b-instruct") -> None:
     Ask Ollama to unload the vision model from memory (e.g. after finishing a group of segments).
     Uses generate with keep_alive=0 so the model is freed.
     """
-    try:
-        import ollama
-    except ImportError:
-        return
-    try:
-        ollama.generate(model=model, prompt="", keep_alive=0)
-    except Exception:
-        pass
+    offload_model(model)
 
 
 @contextmanager
 def vision_model_session(model: str, *, keep_alive: str = "5m"):
     """Reuse a model for one stage, then request unload on success or failure."""
+    _prepare_vision_model(model)
+    token = _SESSION_MODEL.set(model)
     try:
         yield keep_alive
-    finally:
+    except BaseException:
+        offload_model(model, strict=False)
+        raise
+    else:
         offload_vision_model(model)
+    finally:
+        _SESSION_MODEL.reset(token)

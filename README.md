@@ -124,6 +124,10 @@ Results live in `data/` by default. The web app downloads successful results int
 
 Start reuses an existing Ollama service or starts one for this backend session. Closing the API stops only services started by this application, including the optional synthetic service; it leaves independently running services alone.
 
+GPU models and temporary tensors are released between stages, including failed stages. Ollama models are unloaded before another model takes the GPU. The synthetic service loads its classifier only while handling a request and releases it afterward. Cleanup failures stop the next stage from starting.
+
+Synthetic detection prefers the `.venv-synthetic` environment installed by `--with-synthetic`. It can reuse `.venv` if Nonescape is already installed there, or an interpreter selected through `SYNTHETIC_PYTHON`. Startup never installs packages or downloads models. Missing environments report the installation command; other startup failures include the service's error and the path to `.runtime/synthetic-api.log`. New synthetic installations still use a separate environment to protect the core dependencies.
+
 To install software now and fetch models later, use `.\Install.cmd --skip-models` in Windows PowerShell or `bash install.sh --skip-models` on Linux.
 
 **Complete or retry model preparation:**

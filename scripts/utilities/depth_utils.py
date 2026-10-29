@@ -5,6 +5,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
+from scripts.runtime.gpu import inference_call, release_cuda_memory
+from scripts.runtime.ollama import prepare_torch_model
+
 import numpy as np
 from PIL import Image
 
@@ -29,6 +32,7 @@ class DepthExtractResult:
     depth_color: np.ndarray  # (H, W, 3) RGB uint8, colorized for visualization
 
 
+@inference_call
 def extract_depth(
     image: Path | str | Image.Image,
     *,
@@ -75,6 +79,7 @@ def extract_depth(
         else torch.float32
     )
 
+    prepare_torch_model()
     pipe = MarigoldDepthPipeline.from_pretrained(model_id)
     pipe.scheduler = DDIMScheduler.from_config(
         pipe.scheduler.config, timestep_spacing="trailing"
@@ -90,6 +95,8 @@ def extract_depth(
     depth = np.squeeze(depth)
     # Invert so higher = closer (foreground = high)
     depth_np = 1.0 - depth.astype(np.float64)
+    del pipe, output, depth
+    release_cuda_memory()
 
     # Pipeline may pad output to multiples of 8; crop back to original size
     if depth_np.shape[0] > h or depth_np.shape[1] > w:

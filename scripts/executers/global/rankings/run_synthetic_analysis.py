@@ -24,6 +24,8 @@ else:
     raise RuntimeError("ensure_path.py not found above this file")
 
 from scripts.orchestration.progress import progress_steps, start_step
+from scripts.runtime.gpu import inference_call
+from scripts.runtime.ollama import prepare_torch_model
 from scripts.utilities.save_stage_utils import METADATA_FILENAME
 from scripts.extensions import find_metadata_files, get_image_path_from_metadata
 
@@ -59,11 +61,14 @@ def _load_local_classifier(resolved_model_path: str) -> Any:
     return NonescapeClassifier.from_pretrained(resolved_model_path)
 
 
-def _predict_local(classifier: Any, image_path: Path) -> tuple[float, float]:
+@inference_call
+def _predict_local(resolved_model_path: str, image_path: Path) -> tuple[float, float]:
     import torch
     from PIL import Image
     from nonescape import preprocess_image
 
+    prepare_torch_model()
+    classifier = _load_local_classifier(resolved_model_path)
     img = Image.open(image_path).convert("RGB")
     x = preprocess_image(img).unsqueeze(0)
     with torch.no_grad():
@@ -135,11 +140,12 @@ def execute(
     progress_steps("Prepare classifier", "Assess image", "Save findings")
     start_step(1)
     use_api = bool(api_url and str(api_url).strip())
-    classifier = None
 
     if use_api:
         try:
             health = _api_health(str(api_url))
+            if health.get("unload_after_request") is not True:
+                raise RuntimeError("Restart the synthetic API to enable automatic model unloading.")
             print(f"Synthetic API ready: {api_url} (ok={health.get('ok', True)})")
         except Exception as exc:
             raise RuntimeError(
@@ -149,7 +155,6 @@ def execute(
 
     if not use_api:
         resolved = _resolve_model_path(model)
-        classifier = _load_local_classifier(resolved)
 
     written: list[Path] = []
     for meta_path in meta_files:
@@ -170,7 +175,7 @@ def execute(
             except (urlerror.URLError, TimeoutError, ValueError, KeyError) as exc:
                 raise RuntimeError(f"API inference failed for {image_path}: {exc}") from exc
         else:
-            real_prob, synthetic_prob = _predict_local(classifier, image_path)
+            real_prob, synthetic_prob = _predict_local(resolved, image_path)
 
         # probs: [real, synthetic]; index 1 = synthetic
         is_synthetic = synthetic_prob > 0.5

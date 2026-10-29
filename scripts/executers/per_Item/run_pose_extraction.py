@@ -29,6 +29,7 @@ warnings.filterwarnings("ignore", message="Overwriting .* in registry")
 warnings.filterwarnings("ignore", message="The module 'mediapipe' is not installed")
 
 from scripts.orchestration.progress import progress_steps, progress_items, start_step, skip_item
+from scripts.runtime.gpu import inference_call
 from scripts.utilities.save_stage_utils import METADATA_FILENAME, SEGMENTS_SUBFOLDER
 from scripts.utilities.image_utils import ensure_dir
 from scripts.utilities.pose_extraction_utils import (
@@ -65,6 +66,7 @@ def _segment_image_path(run_dir: Path, name: str) -> Path | None:
     return None
 
 
+@inference_call
 def execute(
     run_folder: Path | None = None,
     metadata_folder: Path | None = None,
