@@ -1,5 +1,7 @@
 # Image Forensics Analysis — Backend
 
+**[Illustrated analyzer guide](https://github.com/In-dialog/image-forensics-frontend/blob/main/docs/USER_GUIDE.md)** — screenshots of the main controls, with explanations of stages, prompts, progress, recovery and results.
+
 **[Demo](https://forensic-image-analysis-demo.pages.dev/results/)** · **[Frontend repository](https://github.com/In-dialog/image-forensics-frontend)**
 
 This repository contains the **analysis engine and local API** for Image Forensics Analysis. It runs image-processing and AI models, saves their outputs, and makes those results available to the separate web interface.
