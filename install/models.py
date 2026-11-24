@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 import argparse
+from collections import deque
 from contextlib import contextmanager
 import getpass
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import signal
 import subprocess
@@ -77,8 +79,10 @@ def ollama_ready() -> bool:
         with urllib.request.urlopen("http://127.0.0.1:11434/api/version", timeout=2) as response:
             version = json.load(response).get("version", "0")
         numbers = tuple(int(part) for part in version.split("-")[0].split(".")[:3])
+        # This is the original Qwen3-VL runtime floor. Updated registry files
+        # can require a newer release; retain that error from the pull below.
         if numbers < (0, 12, 7):
-            raise RuntimeError("Update Ollama to version 0.12.7 or newer for Qwen3-VL.")
+            raise RuntimeError(f"Ollama {version} is too old for Qwen3-VL. Update from https://ollama.com/download and restart Ollama before retrying.")
         return True
     except (OSError, ValueError):
         return False
@@ -138,12 +142,38 @@ def prepare_huggingface(yes: bool):
     login(token=token, add_to_git_credential=False)
 
 
+def pull_ollama_model(binary: str, model: str):
+    """Stream download progress and keep the actual error in setup's summary."""
+    tail = deque(maxlen=40)
+    with subprocess.Popen([binary, "pull", model], stdout=subprocess.PIPE, stderr=subprocess.STDOUT) as process:
+        for line in process.stdout:
+            # Preserve the CLI's progress display without relying on the Windows
+            # console's text encoding. StringIO is used by offline tests.
+            output = getattr(sys.stdout, "buffer", None)
+            if output is not None:
+                output.write(line)
+                output.flush()
+            else:
+                sys.stdout.write(line.decode("utf-8", errors="replace"))
+                sys.stdout.flush()
+            text = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", line.decode("utf-8", errors="replace"))
+            tail.extend(text.splitlines())
+        returncode = process.wait()
+    if returncode:
+        detail = "\n".join(tail).strip()
+        # Omit spinner/progress lines before the CLI's error message.
+        error_start = detail.rfind("Error:")
+        if error_start >= 0:
+            detail = detail[error_start:]
+        raise RuntimeError(f"Ollama could not pull {model} (exit {returncode}):\n{detail or 'No error output was returned.'}")
+
+
 def prepare_group(group: str, yes: bool):
     if group == "ollama":
         binary = install_ollama(yes)
         with ollama_session(binary):
             for model in OLLAMA_MODELS:
-                subprocess.run([binary, "pull", model], check=True)
+                pull_ollama_model(binary, model)
         return
     from huggingface_hub import hf_hub_download, snapshot_download
     if group == "sam3":
@@ -214,7 +244,10 @@ def main(argv=None) -> int:
         except Exception as exc:
             print(f"Could not prepare {group}: {exc}")
             print("Previously downloaded files remain cached. Rerun this command to continue.")
-            print("For SAM3 access errors, accept the model's terms with the same Hugging Face account as your token.")
+            if group == "ollama":
+                print("If Ollama reports that a newer version is required (HTTP 412), update from https://ollama.com/download, quit/restart Ollama, then retry with --group ollama.")
+            elif group == "sam3":
+                print("For SAM3 access errors, accept the model's terms with the same Hugging Face account as your token.")
             return 1
     if args.group == "all" and STATE_FILE.exists():
         state = read_state()

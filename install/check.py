@@ -33,7 +33,7 @@ def main(argv=None):
         # Importing a module must not download. These exact classes are used at runtime.
         for module, names in {
             "transformers": ["Sam3Model", "Sam3Processor"],
-            "diffusers": ["MarigoldDepthPipeline"],
+            "diffusers": ["DDIMScheduler", "MarigoldDepthPipeline"],
             "controlnet_aux.open_pose": ["OpenposeDetector"],
             "deepgaze_pytorch": ["DeepGazeMSDB", "MSDBDataset"],
         }.items():

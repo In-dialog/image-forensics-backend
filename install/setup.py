@@ -68,7 +68,7 @@ def show_plan(args, profile, hardware, commands):
     print("Existing HF_HOME/TORCH_HOME are respected. Ollama keeps its own model library (OLLAMA_MODELS).")
     print("Model access: https://huggingface.co/facebook/sam3 (accept access terms in your browser first).")
     print("Get a read token: https://huggingface.co/settings/tokens . The token is never written into this project.")
-    print("Ollama: https://ollama.com/download (0.12.7+ required for Qwen3-VL).")
+    print("Ollama: https://ollama.com/download (use the current release for Qwen3-VL model downloads).")
     if args.with_forgery:
         print("PhotoHolmes is built from pinned upstream source with one packaging patch: opencv-python becomes opencv-python-headless. Its source code and LICENSE are retained.")
         print("PhotoHolmes is an advanced add-on. On Linux install build-essential/python3-dev/libjpeg-dev; Windows may need Visual Studio C++ Build Tools. Native builds are not guaranteed.")

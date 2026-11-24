@@ -21,7 +21,9 @@ Authentication is stored by Hugging Face outside the repository. A token alone d
 
 ## Ollama
 
-The default vision model is [Qwen3-VL 8B Instruct](https://ollama.com/library/qwen3-vl:8b-instruct); whole-image rankings use [8B Thinking](https://ollama.com/library/qwen3-vl:8b-thinking). Each registry entry lists roughly 6.2 GB and requires Ollama 0.12.7 or newer. Installation prepares both model tags. RAM/VRAM use during inference is greater than the download size.
+The default vision model is [Qwen3-VL 8B Instruct](https://ollama.com/library/qwen3-vl:8b-instruct); whole-image rankings use [8B Thinking](https://ollama.com/library/qwen3-vl:8b-thinking). Each registry entry lists roughly 6.2 GB. Use the current Ollama release: although Qwen3-VL originally required 0.12.7, updated model files can require a newer version. Installation prepares both model tags. RAM/VRAM use during inference is greater than the download size.
+
+If a pull fails with HTTP 412 or "requires a newer version of Ollama", update Ollama from its official download, quit and restart Ollama, then rerun model preparation with `--group ollama`. Existing downloads remain cached. This error is unrelated to Hugging Face/SAM3 access.
 
 The installer guides Ollama setup. If a manual install is needed, use [Ollama's official download](https://ollama.com/download), start Ollama, then rerun the project installer. Windows compatibility is documented [here](https://docs.ollama.com/windows).
 

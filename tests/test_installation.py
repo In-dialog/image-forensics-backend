@@ -1,10 +1,10 @@
 """Installer safety and profile tests: no dependencies or downloads required."""
 from contextlib import redirect_stdout
-from io import StringIO
+from io import BytesIO, StringIO
 from pathlib import Path
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from install import models, setup
 from install import start
@@ -76,6 +76,42 @@ class InstallationTests(unittest.TestCase):
              patch("subprocess.run", side_effect=AssertionError("terminate forbidden")):
             with models.ollama_session("ollama"):
                 pass
+
+    def test_ollama_pull_keeps_registry_error_in_failure_summary(self):
+        process = MagicMock()
+        process.stdout = BytesIO(b"\x1b[1Gpulling manifest\r\nError: pull model manifest: 412:\nThe model requires a newer version of Ollama.\n")
+        process.wait.return_value = 1
+        process.__enter__.return_value = process
+        with patch.object(models.subprocess, "Popen", return_value=process), redirect_stdout(StringIO()):
+            with self.assertRaises(RuntimeError) as failure:
+                models.pull_ollama_model("ollama", "qwen3-vl:8b-instruct")
+        message = str(failure.exception)
+        self.assertIn("qwen3-vl:8b-instruct", message)
+        self.assertIn("412", message)
+        self.assertIn("requires a newer version", message)
+        self.assertNotIn("\x1b", message)
+        self.assertNotIn("pulling manifest", message)
+
+    def test_ollama_pull_streams_successful_progress(self):
+        process = MagicMock()
+        process.stdout = BytesIO(b"pulling manifest\nsuccess\n")
+        process.wait.return_value = 0
+        process.__enter__.return_value = process
+        output = StringIO()
+        with patch.object(models.subprocess, "Popen", return_value=process), redirect_stdout(output):
+            models.pull_ollama_model("ollama", "qwen3-vl:8b-instruct")
+        self.assertIn("success", output.getvalue())
+
+    def test_model_failure_advice_matches_the_failed_group(self):
+        for group in ("ollama", "sam3", "depth"):
+            output = StringIO()
+            with self.subTest(group=group), \
+                 patch.object(models, "configure_environment"), \
+                 patch.object(models, "prepare_group", side_effect=RuntimeError("download failed")), \
+                 redirect_stdout(output):
+                self.assertEqual(models.main(["--group", group, "--allow-low-disk"]), 1)
+            self.assertEqual("HTTP 412" in output.getvalue(), group == "ollama")
+            self.assertEqual("same Hugging Face account" in output.getvalue(), group == "sam3")
 
     def test_core_and_optional_installs_preserve_torch_profile(self):
         args = setup.arguments(["--with-forgery", "--with-synthetic"])
